@@ -420,3 +420,17 @@ Join the worker nodes to the cluster
 ```Join command
 kubeadm join 198.46.203.200:6443 --token REDACTED --discovery-token-ca-cert-hash REDACTED
 ```
+
+#### Step 15 - Test with NGINX
+
+Deploy NGINX
+
+```NGINX Deploy
+kubectl create deploy nginx-web-server --image nginx
+```
+
+Expose the service
+
+```Expose NGINX
+kubectl expose deploy nginx-web-server --port 80 --type NodePort
+```
