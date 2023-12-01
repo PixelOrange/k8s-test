@@ -14,7 +14,10 @@ You will also need some basic software.
 
 **Installed on server:**
 ```
-sudo apt install -y jq apt-transport-https ca-certificates curl
+apt-transport-https
+ca-certificates
+curl
+net-tools
 ```
 
 ## Preface
@@ -25,32 +28,25 @@ can skip steps 2-4 if you already have a non-root user as your primary account.
 ## Configuration
 #### Step 1 - Update APT
 
-We need to make sure we have the latest packages before we continue.
+We need to make sure we have the latest packages.
 
 ```Upgrade APT
+sudo apt update
 sudo apt full-upgrade
 ```
 
 #### Step 2 - Create an account
 
-Log in using PuTTY as `root` to create the new user account.
-
 Create the user.
 
 ```Create User
-useradd pixelorange
-```
-
-Assign a password.
-
-```Set Password
-passwd pixelorange
+adduser pixelorange
 ```
 
 Add the user to the `sudo` group so you have admin access.
 
 ```Set Permissions
-sudo usermod -aG sudo pixelorange
+usermod -aG sudo pixelorange
 ```
 
 **Optional:** Ensure that your default shell is `/bin/bash` in `/etc/passwd`. This will
@@ -59,10 +55,12 @@ allow you to use autocomplete, reverse search, and scroll up through commands.
 Open the file.
 
 ```Change shell
-sudo vi /etc/passwd
+vi /etc/passwd
 ```
 
-Search for the username with `/pixelorange` and change `/bin/sh` to `/bin/bash`. Close 
+Search for the username with `/pixelorange` and change `/bin/sh` to `/bin/bash`. 
+
+If the server told you to reboot for changes, do that now. Otherwise, close 
 the `root` user session.
 
 #### Step 3 - Remove SSH login access
@@ -118,7 +116,7 @@ On some flavors of Linux, you'll also need to disable it with `systemctl`. Find 
 to disable.
 
 ```Find the swap
-sudo systemctl --type swap
+sudo systemctl --type swap --all
 ```
 
 Mask the unit(s) listed.
@@ -282,7 +280,7 @@ sudo crictl version
 Download dependencies for K8s. Some may already be installed.
 
 ```Dependencies
-sudo apt install -y apt-transport-https ca-certificates curl
+sudo apt install -y apt-transport-https ca-certificates curl net-tools
 ```
 
 Download the GPG key for the K8s APT repository.
@@ -300,7 +298,8 @@ echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https:/
 Update the repository.
 
 ```Update
-sudo apt update -y
+sudo apt update
+sudo apt full-upgrade -y
 ```
 
 Get the latest version of K8s.
@@ -333,11 +332,23 @@ Pull the images with kubeadm
 sudo kubeadm config images pull
 ```
 
+#### Step 12 - LEADER ONLY - Initialize Kubernetes
+
+Set some basic variables
+
+```Variables
+IPADDR=$(curl ifconfig.me && echo "")
+NODENAME=$(hostname -s)
+POD_CIDR="192.168.0.0/16"
+```
+
 Initialize the cluster
 
 ```kubeadm init
-sudo kubeadm init --pod-network-cidr=192.168.0.0/16 \
---cri-socket unix:///var/run/crio/crio.sock
+sudo kubeadm init --control-plane-endpoint=$IPADDR  \
+--apiserver-cert-extra-sans=$IPADDR  --pod-network-cidr=$POD_CIDR \
+--cri-socket unix:///var/run/crio/crio.sock --node-name $NODENAME \
+--ignore-preflight-errors Swap
 ```
 
 Configure .kube/config
@@ -346,6 +357,15 @@ Configure .kube/config
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
+```
+
+If you have K8s installed on your local machine, run this in CLI
+
+```SCP config
+sudo scp pixelorange@198.46.203.200:~/.kube/config ~/.kube/config
+sudo chown pixelorange ~/.kube/config
+sudo chgrp pixelorange ~/.kube/config
+sudo chmod 770 ~/.kube/config
 ```
 
 Confirm pods were created. Two should be in `ContainerCreating` status.
@@ -366,24 +386,37 @@ Get cluster info.
 kubectl cluster-info
 ```
 
-#### Step 12 - Install Calico
+#### Step 13 - LEADER ONLY - Install Calico
 
-Install Calico Operator
+Get the latest Calico YAML from the manifest tab of
+https://docs.tigera.io/calico/latest/getting-started/kubernetes/self-managed-onprem/onpremises
 
-```Calico Operator
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.4/manifests/tigera-operator.yaml
+```Calico YAML
+curl https://raw.githubusercontent.com/projectcalico/calico/v3.26.4/manifests/calico.yaml -O
 ```
 
-Install Calico CRDs
+Apply it!
 
-```Calico CRDs
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.4/manifests/custom-resources.yaml
+```Apply Calico
+kubectl apply -f calico.yaml
 ```
 
 Check on the Calico pod status
 
 ```Pod Status
-watch kubectl get pods -n calico-system
+watch kubectl get pods -A
 ```
 
-Join command kubeadm token create --print-join-command
+Get the join command
+
+```K8s join
+sudo kubeadm token create --print-join-command
+```
+
+#### Step 14 - WORKERS - Join cluster
+
+Join the worker nodes to the cluster
+
+```Join command
+kubeadm join 198.46.203.200:6443 --token REDACTED --discovery-token-ca-cert-hash REDACTED
+```
